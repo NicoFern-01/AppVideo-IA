@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Race Control: analizador IA local de incidentes en competencias de automovilismo.">
+  <title>🏁 Race Control — Analizador de Incidentes</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="contenedor">
+
+    <!-- ===================== CABECERA ===================== -->
+    <header class="cabecera">
+      <p class="cabecera-cintillo">FIA STEWARD MODE · VISIÓN ARTIFICIAL 100% LOCAL</p>
+      <h1 class="cabecera-titulo">RACE <span class="acento">CONTROL</span></h1>
+      <p class="cabecera-subtitulo">
+        Analiza colisiones y toques en pista con inteligencia artificial local y
+        recibe al instante un informe estructurado de sanción.
+      </p>
+      <ul class="chips">
+        <li class="chip">🤖 qwen2.5vl:7b</li>
+        <li class="chip">🖥️ GPU 6 GB · RAM 32 GB</li>
+        <li class="chip">🔒 Sin nube, todo en tu equipo</li>
+      </ul>
+    </header>
+
+    <main>
+      <!-- ===================== ZONA DE CARGA ===================== -->
+      <section class="tarjeta" aria-labelledby="titulo-carga">
+        <h2 id="titulo-carga" class="tarjeta-titulo">📤 Cargar clip del incidente</h2>
+
+        <!-- Contenedor drag & drop (también abre el selector con clic/teclado) -->
+        <div class="zona-carga" id="zona-carga" role="button" tabindex="0"
+             aria-label="Arrastra un vídeo MP4 o MOV, o pulsa para seleccionar un archivo">
+          <div class="zona-icono" aria-hidden="true">📹</div>
+          <p class="zona-titulo">Arrastra aquí tu clip</p>
+          <p class="zona-texto">o <label class="zona-enlace" for="input-archivo">selecciona un archivo</label></p>
+          <p class="zona-consejo">Formatos <strong>MP4 / MOV</strong> · máximo <strong>15 MB</strong> · recorte recomendado de 5 a 10 segundos</p>
+          <input type="file" id="input-archivo" accept=".mp4,.mov,video/mp4,video/quicktime" hidden>
+        </div>
+
+        <!-- Aviso dinámico de formato/peso -->
+        <p class="aviso" id="aviso" role="alert" hidden></p>
+
+        <!-- Reproductor nativo HTML5: oculto hasta que haya un archivo -->
+        <div class="previsualizacion" id="previsualizacion" hidden>
+          <video id="reproductor" controls playsinline preload="metadata"></video>
+          <div class="previsualizacion-datos">
+            <span class="dato" id="dato-nombre" title=""></span>
+            <span class="dato dato-peso" id="dato-peso"></span>
+          </div>
+          <button type="button" class="btn-tenue" id="btn-quitar">✕ Quitar clip</button>
+        </div>
+
+        <!-- ====== Contexto opcional de la maniobra (se inyecta en el prompt) ====== -->
+        <div class="campo-contexto">
+          <label class="campo-contexto-label" for="contexto-incidente">
+            🧭 Contexto del Incidente <span class="campo-opcional">(Opcional)</span>
+          </label>
+          <textarea
+            id="contexto-incidente"
+            class="campo-contexto-textarea"
+            rows="3"
+            maxlength="500"
+            spellcheck="true"
+            placeholder="Ejemplo: El auto rojo intenta adelantar por el interior en la curva 4 al auto negro con detalles amarillos..."></textarea>
+          <p class="campo-contexto-ayuda">
+            Indica quién ataca, quién defiende o sus números/colores: la IA usará
+            este texto para guiar el análisis visual (máx. 500 caracteres).
+          </p>
+        </div>
+
+        <!-- Acción principal -->
+        <button type="button" class="btn-analizar" id="btn-analizar" disabled>
+          <span class="btn-analizar-texto">ANALIZAR INCIDENTE</span>
+          <span class="btn-analizar-flecha" aria-hidden="true">➜</span>
+        </button>
+      </section>
+
+      <!-- ===================== SPINNER DE CARGA ===================== -->
+      <section class="tarjeta spinner-panel" id="panel-spinner" role="status" aria-live="polite" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="spinner-texto">Analizando telemetría visual... (puede tardar de 30 a 90 segundos por hardware local)</p>
+        <div class="progreso" aria-hidden="true"><span class="progreso-barra"></span></div>
+      </section>
+
+      <!-- ===================== PANEL DE ERROR ===================== -->
+      <section class="tarjeta panel-error" id="panel-error" role="alert" hidden>
+        <h2 class="tarjeta-titulo">⚠️ No se pudo completar el análisis</h2>
+        <p class="panel-error-texto" id="texto-error"></p>
+        <button type="button" class="btn-tenue" id="btn-reintentar">↺ Reintentar</button>
+      </section>
+
+      <!-- ============ PANEL DE RESULTADOS (oculto hasta la respuesta) ============ -->
+      <section class="panel-resultados" id="panel-resultados" aria-labelledby="titulo-resultados" hidden>
+        <h2 class="titulo-resultados" id="titulo-resultados">📋 Informe del Comisario Deportivo</h2>
+
+        <div class="rejilla">
+          <article class="tarjeta tarjeta-glass resultado">
+            <span class="resultado-paso">1) CULPABLE</span>
+            <p class="resultado-culpable" id="resultado-culpable">—</p>
+          </article>
+
+          <article class="tarjeta tarjeta-glass resultado">
+            <span class="resultado-paso">2) ANÁLISIS TÉCNICO</span>
+            <p class="resultado-texto" id="resultado-analisis">—</p>
+          </article>
+
+          <article class="tarjeta tarjeta-glass resultado">
+            <span class="resultado-paso">3) SANCIÓN SUGERIDA</span>
+            <span class="sancion" id="resultado-sancion">—</span>
+          </article>
+        </div>
+
+        <div class="panel-resultados-acciones">
+          <button type="button" class="btn-tenue" id="btn-nuevo">🔄 Realizar otro análisis</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- ===================== PIE ===================== -->
+    <footer class="pie">
+      <p>⚙️ FastAPI + OpenCV + Ollama · Modelo <strong>qwen2.5vl:7b</strong> ejecutándose 100% en tu equipo.</p>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
