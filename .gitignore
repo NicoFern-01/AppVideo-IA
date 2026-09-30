@@ -1,0 +1,24 @@
+# --- Artefactos de ejecución / pruebas locales -------------------------------
+__pycache__/
+*.pyc
+uv_out.log
+uv_err.log
+uv.pid
+pip_out.log
+pip_err.log
+pip.pid
+
+# Secretos locales: el '.env' real nunca se versiona (.env.example SÍ se versiona)
+.env
+
+# Pesos descargados por ultralytics (se regeneran solos en el primer arranque)
+yolo11n.pt
+
+# Recursos pesados de validación local (no versionar)
+_test_vehiculos.mp4
+_test_clip.mp4
+_test_e2e_result.json
+_suite_out.log
+_suite_err.log
+_test_e2e_out.log
+_test_e2e_err.log

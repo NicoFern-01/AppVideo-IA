@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Race Control: analizador IA local de incidentes en competencias de automovilismo.">
   <title>🏁 Control de Carrera — Analizador de Incidentes</title>
+  <link rel="icon" type="image/png" href="/logo.png">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -12,15 +13,20 @@
 
     <!-- ===================== CABECERA ===================== -->
     <header class="cabecera">
-      <p class="cabecera-cintillo">COMISARIO - CDA · VISIÓN ARTIFICIAL 100% LOCAL</p>
-      <h1 class="cabecera-titulo">RACE <span class="acento">CONTROL</span></h1>
+      <div class="cabecera-marca">
+        <img src="/logo.png" alt="CDA" class="cabecera-logo" width="104" height="104">
+        <div class="cabecera-bloque">
+          <p class="cabecera-cintillo">COMISARIO - CDA · VISIÓN ARTIFICIAL LOCAL Y EN LA NUBE</p>
+          <h1 class="cabecera-titulo">RACE <span class="acento">CONTROL</span></h1>
+        </div>
+      </div>
       <p class="cabecera-subtitulo">
         Analiza colisiones y toques en pista con inteligencia artificial local 
       </p>
       <ul class="chips">
         <li class="chip">🤖 qwen2.5vl:7b(MODELO)</li>
         <li class="chip">🖥️ GPU 6 GB · RAM 32 GB</li>
-        <li class="chip">🔒 Sin nube, todo local</li>
+        <li class="chip">🔒 Local · ☁️ Nube (Gemini) opcional</li>
       </ul>
     </header>
 
@@ -29,13 +35,31 @@
       <section class="tarjeta" aria-labelledby="titulo-carga">
         <h2 id="titulo-carga" class="tarjeta-titulo">📤 Cargar clip del incidente</h2>
 
+        <!-- ====== Motor de análisis: Local (Ollama) o Nube (Gemini) ====== -->
+        <div class="selector-motor" role="radiogroup" aria-label="Motor de análisis">
+          <label class="motor-opcion" for="motor-local">
+            <input type="radio" name="motor" id="motor-local" value="local" checked>
+            <span class="motor-caja">
+              <span class="motor-titulo">🔒 Local (Ollama)</span>
+              <span class="motor-detalle">Todo en tu equipo · clips de 5–10 s · 5 fotogramas · máx. 15 MB</span>
+            </span>
+          </label>
+          <label class="motor-opcion" for="motor-nube">
+            <input type="radio" name="motor" id="motor-nube" value="nube">
+            <span class="motor-caja">
+              <span class="motor-titulo">☁️ Nube (Gemini)</span>
+              <span class="motor-detalle">Máxima precisión · videos de hasta 45 s · 20 fotogramas · máx. 100 MB</span>
+            </span>
+          </label>
+        </div>
+
         <!-- Contenedor drag & drop (también abre el selector con clic/teclado) -->
         <div class="zona-carga" id="zona-carga" role="button" tabindex="0"
              aria-label="Arrastra un vídeo MP4 o MOV, o pulsa para seleccionar un archivo">
           <div class="zona-icono" aria-hidden="true">📹</div>
           <p class="zona-titulo">Arrastra aquí tu clip</p>
           <p class="zona-texto">o <label class="zona-enlace" for="input-archivo">selecciona un archivo</label></p>
-          <p class="zona-consejo">Formatos <strong>MP4 / MOV</strong> · máximo <strong>15 MB</strong> · recorte recomendado de 5 a 10 segundos</p>
+          <p class="zona-consejo" id="consejo-archivo">Formatos <strong>MP4 / MOV</strong> · máximo <strong>15 MB</strong> · recorte recomendado de 5 a 10 segundos</p>
           <input type="file" id="input-archivo" accept=".mp4,.mov,video/mp4,video/quicktime" hidden>
         </div>
 
@@ -45,6 +69,40 @@
         <!-- Reproductor nativo HTML5: oculto hasta que haya un archivo -->
         <div class="previsualizacion" id="previsualizacion" hidden>
           <video id="reproductor" controls playsinline preload="metadata"></video>
+
+          <!-- ====== Trimmer: delimita el segundo exacto de la maniobra ====== -->
+          <div class="trimmer" id="trimmer">
+            <div class="trimmer-cabecera">
+              <span class="trimmer-titulo">✂️ RECORTE DE LA MANIOBRA</span>
+            </div>
+            <!-- Línea de tiempo premium: tiempos gigantes + duración del fragmento -->
+            <p class="trimmer-display" id="trimmer-display" aria-live="polite">
+              <span class="trimmer-display-inicio" id="trimmer-display-inicio">Inicio: 00.000 seg</span>
+              <span class="trimmer-display-sep" aria-hidden="true">|</span>
+              <span class="trimmer-display-fin" id="trimmer-display-fin">Fin: 00.000 seg</span>
+              <span class="trimmer-display-duracion" id="trimmer-display-duracion">· Fragmento: 00.000 seg</span>
+            </p>
+            <!-- Etiqueta compacta (la consume app.js; oculta visualmente) -->
+            <span class="trimmer-tiempos trimmer-tiempos--oculto" id="trimmer-tiempos">Inicio: 00.000s | Fin: 00.000s</span>
+            <!-- Botonera: Play/Pausa dedicado del tramo (arranca en Inicio) -->
+            <div class="trimmer-botonera">
+              <button type="button" class="trimmer-play" id="trimmer-play" aria-label="Reproducir el tramo recortado">▶️</button>
+              <span class="trimmer-play-ayuda">Reproduce el tramo en bucle</span>
+            </div>
+            <!-- Rango dual: dos perillas sobre la misma pista horizontal -->
+            <div class="dual-range" id="dual-range">
+              <div class="dual-range-pista" aria-hidden="true"></div>
+              <div class="dual-range-seleccion" id="dual-seleccion" aria-hidden="true"></div>
+              <input type="range" class="dual-range-input" id="rango-inicio"
+                     min="0" max="100" step="0.001" value="0" aria-label="Tiempo de inicio del recorte">
+              <input type="range" class="dual-range-input" id="rango-fin"
+                     min="0" max="100" step="0.001" value="0" aria-label="Tiempo de fin del recorte">
+            </div>
+            <p class="trimmer-ayuda">
+              Arrastra las perillas para encuadrar el toque: el reproductor salta al
+              fotograma exacto. Si no tocas nada, se analiza el clip completo.
+            </p>
+          </div>
           <div class="previsualizacion-datos">
             <span class="dato" id="dato-nombre" title=""></span>
             <span class="dato dato-peso" id="dato-peso"></span>
@@ -79,8 +137,11 @@
 
       <!-- ===================== SPINNER DE CARGA ===================== -->
       <section class="tarjeta spinner-panel" id="panel-spinner" role="status" aria-live="polite" hidden>
-        <div class="spinner" aria-hidden="true"></div>
-        <p class="spinner-texto">Analizando telemetría visual... (puede tardar de 30 a 90 segundos por hardware local)</p>
+        <div class="spinner-caja" aria-hidden="true">
+          <div class="spinner"></div>
+          <img src="/logo.png" alt="" class="spinner-logo">
+        </div>
+        <p class="spinner-texto" id="spinner-texto">Analizando telemetría visual... (puede tardar de 30 a 90 segundos por hardware local)</p>
         <div class="progreso" aria-hidden="true"><span class="progreso-barra"></span></div>
       </section>
 
@@ -120,7 +181,10 @@
 
     <!-- ===================== PIE ===================== -->
     <footer class="pie">
-      <p>⚙️ FastAPI + OpenCV + Ollama · Modelo <strong>qwen2.5vl:7b</strong> ejecutándose 100% en tu equipo.</p>
+      <img src="/logo.png" alt="CDA - ACA" class="pie-logo" width="26" height="26">
+      <p>⚙️ FastAPI + OpenCV + YOLOv11 · Motor <strong>local</strong> (Ollama, qwen2.5vl:7b) o <strong>nube</strong> (Gemini, gemini-2.5-flash).</p>
+      <!-- Sello de versión del desarrollo: lo rellena app.js desde GET /version -->
+      <span class="pie-version" id="version-app" title="Versión del desarrollo">v—</span>
     </footer>
   </div>
 

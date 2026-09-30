@@ -1,0 +1,39 @@
+CÓDIGO DEPORTIVO Y REGLAMENTO DE MANIOBRAS EN PISTA
+
+REGLAMENTO DEPORTIVO INTERNACIONAL Y ESTÁNDARES DE CONDUCCIÓN DE LA FIA
+
+ARTÍCULO 1: CRITERIO DE ADELANTAMIENTO POR EL INTERIOR EN CURVA
+Para que un vehículo atacante tenga derecho al espacio por el carril interior durante el viraje, debe cumplir las siguientes condiciones concurrentes ANTES o AL LLEGAR al punto de giro (Apex/Vértice de la curva):
+- Posicionamiento: Debe haber colocado al menos su eje delantero de forma paralela al retrovisor o sección media del vehículo defensor.
+- Control del auto: Debe realizar la maniobra manteniendo el control absoluto del vehículo, siendo capaz de trazar una línea de carrera razonable sin bloquear neumáticos de forma severa.
+- Límites de pista: Debe completar el adelantamiento permaneciendo en todo momento dentro de los límites de la pista (líneas blancas).
+* RESOLUCIÓN: Si el atacante cumple estas tres condiciones, el defensor debe dejar obligatoriamente el ancho mínimo de un auto en pista. Si el atacante no se empareja a tiempo y fuerza la maniobra por el interior bloqueando o golpeando el lateral del rival, incurre en un 'Divebomb' ilegal y la culpa es 100% suya.
+
+ARTÍCULO 2: CRITERIO DE ADELANTAMIENTO POR EL EXTERIOR EN CURVA
+Para que un vehículo atacante tenga derecho al espacio por el carril exterior durante el viraje, se evalúa su posición en el Apex:
+- Posicionamiento en el Apex: El eje delantero del auto atacante debe estar AL MENOS a la par o por delante del eje delantero del vehículo defensor en el vértice de la curva.
+- Requisitos adicionales: El atacante debe ser capaz de mantener el auto controlado y trazar la curva por fuera dentro de los límites de la pista.
+* RESOLUCIÓN: Si el atacante cumple esta condición en el Apex, tiene derecho al espacio tanto en el vértice como en la salida de la curva. El defensor que va por el interior tiene derecho a su línea, pero está estrictamente prohibido que abra la dirección deliberadamente ("Crowding/Pushing off track") para empujar, arrastrar o expulsar al auto exterior fuera de los límites de la pista en el radio de salida. Si el defensor lo hace, la culpa es suya.
+
+ARTÍCULO 3: COMPORTAMIENTO EN CHICANAS, CHICANAS REPETIDAS Y CURVAS EN "S" (ESSES)
+En secuencias de curvas consecutivas (Chicanas o curvas en S), el derecho al espacio y la prioridad de la trayectoria se dictaminan exclusivamente en base al primer elemento geométrico (la primera curva):
+- Si el auto atacante gana legalmente la prioridad en la curva 1 (según los criterios de los Artículos 1 y 2), el auto defensor debe ceder la trayectoria ideal y garantizar el espacio para la curva 2 que cambia de sentido.
+- Cortar la chicana: Si un auto evita el contacto o mantiene una posición saliéndose de la pista y cortando las salchichas/pianos de la chicana, comete una infracción por "ganar ventaja duradera fuera de pista". Debe devolver la posición de inmediato o será sancionado de forma directa.
+
+ARTÍCULO 4: DEFENSAS DE POSICIÓN, CAMBIOS DE TRAYECTORIA Y RE-APROXIMACIÓN (STRAIGHTS CONDUCT)
+La conducta en rectas y defensa de posición se rige bajo límites estrictos de movimientos:
+- Límite de movimientos: El vehículo defensor solo puede realizar UN único cambio de dirección para defender su posición en las rectas. El zigzagueo (Weaving) está prohibido.
+- Re-aproximación a la línea ideal: Si un piloto se mueve fuera de la línea de carrera para defender su posición y luego desea regresar hacia la línea ideal para tomar la curva, debe dejar OBLIGATORIAMENTE al menos el ancho de un auto entre su propio vehículo y el límite de la pista al aproximarse a la zona de frenado.
+- Movimiento en frenada (Moving under braking): Está terminantemente prohibido realizar cualquier cambio de trayectoria o movimiento de bloqueo una vez que la fase de frenado hacia la curva ha comenzado. Cualquier ajuste brusco del defensor en la frenada que cause un choque por alcance o fuerce al rival a realizar una maniobra evasiva violenta resultará en culpa automática del defensor.
+
+ARTÍCULO 5: LÍMITES DE PISTA Y VENTAJAS ILEGALES (TRACK LIMITS)
+Las líneas blancas definen de forma estricta los bordes de la pista; los pianos/bordillos forman parte de los límites pero no el suelo exterior a la línea:
+- Salirse de pista para adelantar: Está estrictamente prohibido completar un adelantamiento habiendo colocado las cuatro ruedas fuera de la línea blanca. El piloto atacante debe devolver la posición inmediatamente.
+- Salirse de pista para defender: Si un piloto defensor comete un error, se sale de la pista, y al reincorporarse corta camino o mantiene la posición bloqueando al rival que venía por la pista limpia, debe ceder el puesto de inmediato.
+
+ARTÍCULO 6: CATÁLOGO DE SANCIONES Y CRITERIOS DE LOS COMISARIOS
+Los comisarios deportivos aplicarán las penalizaciones de forma estricta según la gravedad:
+- INCIDENTE DE CARRERA: Contactos colaterales o toques donde la responsabilidad esté dividida de forma equivalente (50/50), o causados por pérdida de adherencia súbita (trompos independientes, fluidos en pista, clima extremo) sin infracciones flagrantes a los artículos anteriores. Sin sanción.
+- APERCIBIMIENTO / ADVERTENCIA: Contactos menores de carrera ("toques de paragolpes" o roces sin daños estructurales) donde no hubo pérdida de control ni alteración de las posiciones de la carrera.
+- PENALIZACIÓN DE +5 SEGUNDOS: Causar una colisión evitable debido a una frenada pasada (Divebomb fallido del Art. 1), arrastrar al rival por el interior, o empujar levemente al auto exterior en la salida de una curva (Art. 2) provocando que pierda posiciones.
+- PENALIZACIÓN DE +10 SEGUNDOS / DRIVE THROUGH: Maniobras altamente temerarias o peligrosas. Incluye de forma obligatoria los bloqueos ilegales en zona de frenado (Art. 4), empujones deliberados que provoquen el abandono o accidente del rival contra las protecciones, o negarse a devolver una posición ganada ilegalmente fuera de los límites de pista (Art. 5).

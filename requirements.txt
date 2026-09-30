@@ -3,8 +3,11 @@
 
 fastapi>=0.115.0
 uvicorn>=0.30.0
-opencv-python-headless>=4.10.0
+# opencv-python (build estándar): ultralytics exige este paquete para su pipeline de video.
+opencv-python>=4.10.0
 ollama>=0.4.0
 numpy>=1.26.0
 python-multipart>=0.0.9
+# Visión por computadora: detección geométrica de vehículos (YOLOv11-n) en el backend.
+ultralytics>=8.3.0
 
