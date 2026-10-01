@@ -33,12 +33,21 @@ const versionApp = document.getElementById("version-app");
 const radiosMotor = document.querySelectorAll('input[name="motor"]');
 const consejoArchivo = document.getElementById("consejo-archivo");
 const spinnerTexto = document.getElementById("spinner-texto");
-const rangoInicio = document.getElementById("rango-inicio");
-const rangoFin = document.getElementById("rango-fin");
-const trimmerTiempos = document.getElementById("trimmer-tiempos");
-const trimmerDisplayInicio = document.getElementById("trimmer-display-inicio");
-const trimmerDisplayFin = document.getElementById("trimmer-display-fin");
-const trimmerDisplayDuracion = document.getElementById("trimmer-display-duracion");
+const timelineRuler = document.getElementById("timeline-ruler");
+const timelineLanes = document.getElementById("timeline-lanes");
+const timelineTrack = document.getElementById("timeline-track");
+const timelinePlay = document.getElementById("timeline-play");
+const btnFullscreen = document.getElementById("btn-fullscreen");
+const selectionOverlay = document.getElementById("selection-overlay");
+const playheadLine = document.getElementById("playhead-line");
+const tlInicio = document.getElementById("tl-inicio");
+const tlFin = document.getElementById("tl-fin");
+const tlFragmento = document.getElementById("tl-fragmento");
+const tlPosicion = document.getElementById("tl-posicion");
+const selEtiquetaInicio = document.getElementById("sel-etiqueta-inicio");
+const selEtiquetaFin = document.getElementById("sel-etiqueta-fin");
+const btnVer = document.getElementById("timeline-ver");
+const btnBloquear = document.getElementById("timeline-bloquear");
 
 // ---------------------------------------------------------------------------
 // Constantes y estado
@@ -79,50 +88,152 @@ function configMotor() {
 }
 
 // ---------------------------------------------------------------------------
-// Trimmer: dos barras de rango delimitan los segundos de la maniobra.
-// REGLAS: (1) las etiquetas se actualizan SOLO en 'input' (tiempo real,
-// aun con el video pausado); 'timeupdate' solo aplica el bucle acotado.
-// (2) Inicio y Fin tienen manejadores SEPARADOS (sin conflicto).
+// Timeline window: línea de tiempo profesional (estilo VSDC / Premiere) que
+// delimita los segundos exactos de la maniobra sobre la pista de video.
+// REGLAS: (1) el bloque verde actualiza 'tiempoInicio'/'tiempoFin' al ms
+// exacto en cada arrastre; (2) al mover un borde se INYECTA el fotograma
+// (currentTime + play()/pause() inmediato) para que el navegador repinte el
+// cuadro aunque el video esté pausado; (3) el bucle estricto NO depende de
+// 'timeupdate' (el navegador lo dispara cada ~250 ms y el video "escapa"):
+// un motor unificado a 16 ms + rAF verifica cada instante que la posición
+// siga dentro de [Inicio - 0.1, Fin) mientras reproduce, y si se escapa
+// vuelve al Inicio obligatoriamente.
 // ---------------------------------------------------------------------------
 
-// Separación mínima Inicio < Fin y tolerancia anti-loop de Chromium.
-const SEPARACION_MINIMA = 0.5;   // El Inicio se detiene 0.5 s antes del Fin.
-const TOLERANCIA_BUCLE = 0.1;    // Margen para no atrapar a Chromium en un loop.
-let suprimirBucleHasta = 0;      // Supresor temporal tras previsualizar el Fin.
-let temporizadorVistaFin = null; // Anti-rebote de la vista previa del Fin.
+const SEPARACION_MINIMA = 0.5;    // El Inicio se detiene 0.5 s antes del Fin.
+const INTERVALO_BUCLE_MS = 16;    // Motor de control del rango a ~60 FPS (16 ms/tic).
+const TOLERANCIA_INFERIOR = 0.1;  // Bucle estricto: cuenta como fuga solo cuando
+                                  // 'ahora < inicio - 0.1'; por debajo, la rejilla
+                                  // de fotogramas (FPS raros) sigue siendo "dentro".
+const TOLERANCIA_SEEK = 0.05;     // 50 ms de enfriamiento entre saltos forzados: evita
+                                  // que el navegador quede atrapado saltando eterna-
+                                  // mente al mismo píxel temporal (bucle de seeks).
 
-/** Formatea segundos como "02.4s" (parte entera con 2 dígitos). */
+let tiempoInicio = 0;   // Segundos del borde izquierdo del bloque verde
+let tiempoFin = 0;      // Segundos del borde derecho del bloque verde
+let seekPendiente = false;      // true mientras el motor procesa un salto forzado
+let ultimoSaltoForzadoEn = 0;   // performance.now() del último salto forzado
+let inyeccionActiva = false;    // true durante la micro-reproducción play()/pause()
+let arrastreSeleccion = null; // Arrastre activo del bloque verde o de sus bordes
+let pistaBloqueada = false;   // Candado de la capa "Video Track 1"
+
+/** Convierte segundos a "05.123" (2 dígitos + milisegundos exactos). */
 function formatearTiempo(segundos) {
-  return `${Number(segundos || 0).toFixed(1).padStart(4, "0")}s`;
+  return Number(segundos || 0).toFixed(3).padStart(6, "0");
 }
 
-/** Formatea segundos como "02.4 seg" para la línea de tiempo gigante. */
-function formatearTiempoLargo(segundos) {
-  return `${Number(segundos || 0).toFixed(1).padStart(4, "0")} seg`;
+/** Convierte segundos a "00:05.123" (mm:ss.mmm) para la regla milimétrica. */
+function formatearTiempoRegla(segundos) {
+  const totalMs = Math.round(Math.max(0, Number(segundos) || 0) * 1000);
+  const minutos = Math.floor(totalMs / 60000);
+  const segundosEnteros = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
+  return (
+    `${String(minutos).padStart(2, "0")}:` +
+    `${String(segundosEnteros).padStart(2, "0")}.` +
+    String(ms).padStart(3, "0")
+  );
 }
 
-/** Refresca la etiqueta dinámica gigante "Inicio: XX.X seg | Fin: XX.X seg". */
-function actualizarTrimmer() {
-  const inicio = Number(rangoInicio.value || 0);
-  const fin = Number(rangoFin.value || 0);
-  const duracion = Math.max(0, fin - inicio);
-  trimmerTiempos.textContent =
-    `Inicio: ${formatearTiempo(inicio)} | Fin: ${formatearTiempo(fin)}`;
-  if (trimmerDisplayInicio) {
-    trimmerDisplayInicio.textContent = `Inicio: ${formatearTiempoLargo(inicio)}`;
+/** Duración total del clip cargado (0 si aún no hay metadata). */
+function duracionTotal() {
+  const duracion = Number(reproductor.duration);
+  return Number.isFinite(duracion) && duracion > 0 ? duracion : 0;
+}
+
+/** Redondea a milisegundos exactos (la precisión que viaja al backend). */
+function redondearMs(valor) {
+  return Math.round((Number(valor) || 0) * 1000) / 1000;
+}
+
+/** Refresca la lectura de la barra de herramientas y coloca el bloque verde
+ *  sobre la pista con precisión de milisegundos: posición% = (t / duración) * 100. */
+function actualizarTimeline() {
+  const duracion = duracionTotal();
+  const hayClip = duracion > 0;
+
+  if (selectionOverlay) {
+    if (hayClip) {
+      const pInicio = (Math.min(Math.max(tiempoInicio, 0), duracion) / duracion) * 100;
+      const pFin = (Math.min(Math.max(tiempoFin, 0), duracion) / duracion) * 100;
+      selectionOverlay.style.left = `${Math.min(pInicio, pFin)}%`;
+      selectionOverlay.style.width = `${Math.max(0, pFin - pInicio)}%`;
+      selectionOverlay.hidden = false;
+    } else {
+      selectionOverlay.hidden = true;
+    }
   }
-  if (trimmerDisplayFin) {
-    trimmerDisplayFin.textContent = `Fin: ${formatearTiempoLargo(fin)}`;
+  if (tlInicio) tlInicio.textContent = `${formatearTiempo(tiempoInicio)} s`;
+  if (tlFin) tlFin.textContent = `${formatearTiempo(tiempoFin)} s`;
+  if (tlFragmento) {
+    tlFragmento.textContent = `${formatearTiempo(Math.max(0, tiempoFin - tiempoInicio))} s`;
   }
-  if (trimmerDisplayDuracion) {
-    trimmerDisplayDuracion.textContent = `· Fragmento: ${formatearTiempoLargo(duracion)}`;
+  if (selEtiquetaInicio) selEtiquetaInicio.textContent = formatearTiempo(tiempoInicio);
+  if (selEtiquetaFin) selEtiquetaFin.textContent = formatearTiempo(tiempoFin);
+}
+
+/** Mueve la aguja roja con (video.currentTime / video.duration) * 100 y
+ *  refresca la lectura POS de la barra de herramientas. */
+function actualizarAguja() {
+  if (!playheadLine) return;
+  const duracion = duracionTotal();
+  if (duracion <= 0) {
+    playheadLine.hidden = true;
+    if (tlPosicion) tlPosicion.textContent = `${formatearTiempo(0)} s`;
+    return;
   }
+  const ahora = Math.min(Math.max(Number(reproductor.currentTime) || 0, 0), duracion);
+  playheadLine.hidden = false;
+  playheadLine.style.left = `${(ahora / duracion) * 100}%`;
+  if (tlPosicion) tlPosicion.textContent = `${formatearTiempo(ahora)} s`;
+}
+
+/** La aguja roja se recalcula en CADA frame para que el movimiento sea fluido. */
+function bucleAguja() {
+  actualizarAguja();
+  requestAnimationFrame(bucleAguja);
+}
+
+/** Construye la regla superior: marcas uniformes etiquetadas (mm:ss.mmm) y
+ *  marcas menores a medio paso, repartidas según la duración total del clip. */
+function construirRegla() {
+  if (!timelineRuler) return;
+  timelineRuler.textContent = "";
+  const duracion = duracionTotal();
+  if (duracion <= 0) return;
+
+  const pasos = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  const paso = pasos.find((p) => duracion / p <= 10) || pasos[pasos.length - 1];
+
+  const crearMarca = (tiempo, esMenor) => {
+    const marca = document.createElement("span");
+    marca.className =
+      "timeline-ruler-marca" + (esMenor ? " timeline-ruler-marca--menor" : "");
+    if (tiempo <= 0) marca.classList.add("timeline-ruler-marca--inicio");
+    if (tiempo >= duracion) marca.classList.add("timeline-ruler-marca--fin");
+    marca.style.left = `${Math.min(Math.max(tiempo / duracion, 0), 1) * 100}%`;
+    if (!esMenor) {
+      const etiqueta = document.createElement("span");
+      etiqueta.className = "timeline-ruler-etiqueta";
+      etiqueta.textContent = formatearTiempoRegla(tiempo);
+      marca.appendChild(etiqueta);
+    }
+    timelineRuler.appendChild(marca);
+  };
+
+  const tramos = Math.floor(duracion / paso);
+  for (let i = 0; i <= tramos; i++) {
+    const t = i * paso;
+    crearMarca(t, false);
+    if (t + paso / 2 < duracion) crearMarca(t + paso / 2, true);
+  }
+  if (duracion - tramos * paso > paso * 0.4) crearMarca(duracion, false); // Cierre exacto.
 }
 
 /** Salto seguro: recorta al rango [0, duración] antes de asignar currentTime. */
 function saltarA(segundos) {
-  if (!Number.isFinite(Number(reproductor.duration))) return;
-  const destino = Math.min(Math.max(Number(segundos) || 0, 0), reproductor.duration);
+  if (!Number.isFinite(parseFloat(reproductor.duration))) return;
+  const destino = Math.min(Math.max(parseFloat(segundos) || 0, 0), reproductor.duration);
   try {
     reproductor.currentTime = destino;
   } catch {
@@ -130,109 +241,258 @@ function saltarA(segundos) {
   }
 }
 
-/** Cuando el navegador conoce la duración, calibra las barras al clip real. */
-function prepararTrimmer() {
-  const duracion = Number(reproductor.duration);
-  if (!Number.isFinite(duracion) || duracion <= 0) return;
-  for (const barra of [rangoInicio, rangoFin]) {
-    barra.min = "0";
-    barra.max = duracion.toFixed(1);
-    barra.step = "0.1";
-  }
-  rangoInicio.value = "0";
-  rangoFin.value = duracion.toFixed(1);
-  actualizarTrimmer();
+/** Cuando el navegador conoce la duración, calibra la línea de tiempo al clip
+ *  real: bloque verde al 100 %, regla milimétrica y aguja al inicio. */
+function prepararTimeline() {
+  const duracion = duracionTotal();
+  if (duracion <= 0) return;
+  tiempoInicio = 0;
+  tiempoFin = redondearMs(duracion);
+  rearmarBucle();
+  construirRegla();
+  actualizarTimeline();
+  actualizarAguja();
 }
 
-/** Estado neutro del Trimmer (al cargar o quitar un clip). */
-function reiniciarTrimmer() {
-  if (temporizadorVistaFin !== null) {
-    clearTimeout(temporizadorVistaFin);
-    temporizadorVistaFin = null;
-  }
-  suprimirBucleHasta = 0;
-  rangoInicio.value = "0";
-  rangoFin.value = "0";
-  if (trimmerDisplayInicio) trimmerDisplayInicio.textContent = "Inicio: 00.0 seg";
-  if (trimmerDisplayFin) trimmerDisplayFin.textContent = "Fin: 00.0 seg";
-  if (trimmerDisplayDuracion) trimmerDisplayDuracion.textContent = "· Fragmento: 00.0 seg";
-  trimmerTiempos.textContent = "Inicio: 00.0s | Fin: 00.0s";
+/** Estado neutro de la línea de tiempo (al cargar o quitar un clip). */
+function reiniciarTimeline() {
+  tiempoInicio = 0;
+  tiempoFin = 0;
+  rearmarBucle();
+  arrastreSeleccion = null;
+  if (timelineRuler) timelineRuler.textContent = "";
+  actualizarTimeline();
+  actualizarAguja();
+  actualizarBotonPlay();
 }
 
-/** Al mover INICIO: actualiza etiquetas al instante, valida límite y previsualiza.
- *  Pausa el video para mostrar el cuadro exacto de comienzo (saltar + mantener
- *  la pausa si estaba pausado), así se ve el frame fijo sin conflicto. */
-function alMoverInicio() {
-  let valor = Number(rangoInicio.value);
-  if (!Number.isFinite(valor)) return;
+/** Convierte una posición horizontal (px) de la línea de tiempo a segundos. */
+function tiempoDesdeX(clientX) {
+  const duracion = duracionTotal();
+  if (!timelineLanes || duracion <= 0) return 0;
+  const rect = timelineLanes.getBoundingClientRect();
+  if (rect.width <= 0) return 0;
+  const fraccion = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+  return fraccion * duracion;
+}
 
-  // Validación de límites: el Inicio nunca puede ser >= Fin: se detiene
-  // 0.5 s antes del final (SEPARACION_MINIMA).
-  const fin = Number(rangoFin.value);
-  if (Number.isFinite(fin) && valor >= fin) {
-    valor = Math.max(0, fin - SEPARACION_MINIMA);
-    rangoInicio.value = String(valor);
+/** Pointerdown sobre el bloque verde o sus bordes: inicia el arrastre y, como
+ *  en los editores reales, pausa el video para trabajar sobre un fotograma. */
+function alIniciarArrastre(evento) {
+  if (!archivoActual || pistaBloqueada) return;
+  if (duracionTotal() <= 0) return;
+  evento.preventDefault();
+  const destino = evento.target;
+  const modo =
+    destino && destino.dataset && destino.dataset.modo ? destino.dataset.modo : "mover";
+  arrastreSeleccion = {
+    id: evento.pointerId,
+    modo,
+    desfase: modo === "mover" ? tiempoDesdeX(evento.clientX) - tiempoInicio : 0,
+    ancho: Math.max(0, tiempoFin - tiempoInicio),
+  };
+  try {
+    selectionOverlay.setPointerCapture(evento.pointerId);
+  } catch {
+    /* Captura no disponible: el arrastre sigue con los eventos normales. */
   }
-
-  actualizarTrimmer(); // Etiquetas en tiempo real, aun con el video pausado.
-
-  // Previsualización: salta al segundo exacto de comienzo y pausa
-  // temporalmente para que se vea el cuadro fijo.
   if (!reproductor.paused) reproductor.pause();
-  saltarA(valor);
+  // Previsualización inmediata del borde que se va a tocar (inyección de fotograma).
+  inyectarFotograma(modo === "fin" ? tiempoFin : tiempoInicio);
 }
 
-/** Al mover FIN: actualiza etiquetas al instante, valida límite y previsualiza.
- *  El salto al final se difiere con anti-rebote para no entrar en bucle con
- *  el validador de tiempo ('timeupdate'): mientras el usuario arrastra, solo
- *  se refrescan las etiquetas; al soltar (250 ms sin mover), se previsualiza
- *  el cuadro de fin con el bucle suprimido temporalmente. */
-function alMoverFin() {
-  let valor = Number(rangoFin.value);
-  if (!Number.isFinite(valor)) return;
+/** Pointermove: actualiza 'tiempoInicio'/'tiempoFin' al milisegundo exacto
+ *  (toFixed(3)) y salta el reproductor superior al fotograma resultante. */
+function alArrastrarSeleccion(evento) {
+  if (!arrastreSeleccion || evento.pointerId !== arrastreSeleccion.id) return;
+  evento.preventDefault();
+  const duracion = duracionTotal();
+  if (duracion <= 0) return;
+  const t = tiempoDesdeX(evento.clientX);
 
-  // Validación de límites: el Fin nunca puede ser <= Inicio: se fuerza a
-  // Inicio + 0.5 s como mínimo (SEPARACION_MINIMA).
-  const inicio = Number(rangoInicio.value);
-  if (Number.isFinite(inicio) && valor <= inicio) {
-    valor = inicio + SEPARACION_MINIMA;
-    rangoFin.value = String(valor);
+  if (arrastreSeleccion.modo === "mover") {
+    const inicio = Math.min(
+      Math.max(t - arrastreSeleccion.desfase, 0),
+      Math.max(duracion - arrastreSeleccion.ancho, 0)
+    );
+    tiempoInicio = redondearMs(inicio);
+    tiempoFin = redondearMs(inicio + arrastreSeleccion.ancho);
+  } else if (arrastreSeleccion.modo === "inicio") {
+    // El Inicio jamás alcanza al Fin (SEPARACION_MINIMA).
+    tiempoInicio = redondearMs(Math.max(0, Math.min(t, tiempoFin - SEPARACION_MINIMA)));
+  } else {
+    // El Fin jamás se queda atrás del Inicio.
+    tiempoFin = redondearMs(Math.min(duracion, Math.max(t, tiempoInicio + SEPARACION_MINIMA)));
   }
+  // Doble candado: ambos bordes siempre dentro de [0, duración] al ms exacto.
+  tiempoInicio = redondearMs(Math.min(Math.max(tiempoInicio, 0), duracion));
+  tiempoFin = redondearMs(Math.min(Math.max(tiempoFin, 0), duracion));
 
-  actualizarTrimmer(); // Etiquetas en tiempo real, aun con el video pausado.
+  actualizarTimeline();
 
-  // Anti-rebote: retrasa la vista previa 250 ms para que el arrastre no
-  // dispare saltos continuos que choquen con 'timeupdate'.
-  if (temporizadorVistaFin !== null) clearTimeout(temporizadorVistaFin);
-  temporizadorVistaFin = setTimeout(() => {
-    temporizadorVistaFin = null;
-    if (!reproductor.paused) reproductor.pause();
-    suprimirBucleHasta = performance.now() + 600; // El bucle ignora este salto.
-    saltarA(valor);
-  }, 250);
+  // FOTOGRAMA EN TIEMPO REAL: la pantalla superior refleja matemáticamente
+  // dónde empieza (o termina) el corte, con inyección forzada del cuadro.
+  inyectarFotograma(arrastreSeleccion.modo === "fin" ? tiempoFin : tiempoInicio);
+  actualizarAguja();
 }
 
-/** Compatibilidad: despacha al manejador separado según la barra movida. */
-function alMoverRango(evento) {
-  if (evento.currentTarget === rangoInicio) alMoverInicio();
-  else alMoverFin();
+/** Pointerup/cancel: cierra el arrastre; el rango ya quedó al milisegundo. */
+function alSoltarSeleccion(evento) {
+  if (!arrastreSeleccion || evento.pointerId !== arrastreSeleccion.id) return;
+  try {
+    selectionOverlay.releasePointerCapture(evento.pointerId);
+  } catch {
+    /* La captura ya se había liberado: nada que hacer. */
+  }
+  arrastreSeleccion = null;
 }
 
-/** Bucle acotado ESTRICTO con tolerancia anti-loop de Chromium (0.1 s):
- *  Si currentTime sale de la ventana [Inicio, Fin], vuelve al Inicio.
- *  La tolerancia evita el loop infinito al forzar 'currentTime' y el
- *  supresor ignora el salto de previsualización del Fin. */
-function alActualizarTiempo() {
-  if (reproductor.paused) return;
-  if (performance.now() < suprimirBucleHasta) return; // Salto de vista previa.
-  const fin = Number(rangoFin.value);
-  const inicio = Number(rangoInicio.value);
-  if (!Number.isFinite(fin) || !Number.isFinite(inicio)) return;
-  const ahora = Number(reproductor.currentTime);
+/** Clic en la regla: mueve la aguja roja y salta el video a ese tiempo. */
+function alClicRegla(evento) {
+  const duracion = duracionTotal();
+  if (duracion <= 0 || !timelineRuler) return;
+  const rect = timelineRuler.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const fraccion = Math.min(Math.max((evento.clientX - rect.left) / rect.width, 0), 1);
+  // Como en un editor NLE: fijar el cursor en la regla pausa la reproducción
+  // e inyecta el fotograma elegido para verlo al instante.
+  if (!reproductor.paused) reproductor.pause();
+  inyectarFotograma(fraccion * duracion);
+  actualizarAguja();
+}
+
+/** Alterna Play/Pausa del tramo: al reproducir arranca en el Inicio si la
+ *  posición actual quedó fuera de la ventana [Inicio, Fin]. */
+function alternarPlayTimeline() {
+  if (!archivoActual) return;
+  if (reproductor.paused) {
+    // parseFloat estricto antes de CUALQUIER comparación matemática.
+    const inicio = parseFloat(tiempoInicio);
+    const fin = parseFloat(tiempoFin);
+    const ahora = parseFloat(reproductor.currentTime);
+    rearmarBucle();
+    if (!(Number.isFinite(inicio) && ahora >= inicio && ahora < fin)) saltarA(inicio);
+    const intento = reproductor.play();
+    if (intento && typeof intento.catch === "function") {
+      intento.catch(() => { /* Autoplay bloqueado u otro fallo: se ignora. */ });
+    }
+  } else {
+    reproductor.pause();
+  }
+}
+
+/** Sincroniza el icono del botón Play/Pausa de la barra de herramientas. */
+function actualizarBotonPlay() {
+  if (!timelinePlay || inyeccionActiva) return; // Ignora el play()/pause() de la inyección
+  const reproduciendo = !reproductor.paused && !reproductor.ended;
+  timelinePlay.textContent = reproduciendo ? "⏸" : "▶";
+  timelinePlay.classList.toggle("timeline-play--activo", reproduciendo);
+  timelinePlay.setAttribute(
+    "aria-label",
+    reproduciendo ? "Pausar la reproducción" : "Reproducir el tramo seleccionado"
+  );
+}
+
+/** El clip completo alcanzó su fin: el bucle acotado lo devuelve al Inicio. */
+function alTerminarBucle() {
+  const inicio = parseFloat(tiempoInicio);
+  const fin = parseFloat(tiempoFin);
+  if (!archivoActual || !(fin > inicio)) return;
+  rearmarBucle();
+  saltarA(inicio);
+  const intento = reproductor.play();
+  if (intento && typeof intento.catch === "function") {
+    intento.catch(() => { /* Reproducción automática bloqueada: se ignora. */ });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MOTOR DE REPRODUCCIÓN UNIFICADO (alta frecuencia, sin 'timeupdate')
+// ---------------------------------------------------------------------------
+// El evento 'timeupdate' queda DESCARTADO como control de bucle: el navegador
+// lo dispara solo cada ~250 ms y entre evento y evento el video escapa del
+// rango. En su lugar, 'tickMotor' se ejecuta cada 16 ms (setInterval, ~60 FPS)
+// —también con la pestaña en segundo plano, donde rAF se suspende— y en cada
+// requestAnimationFrame, aplicando la regla estricta:
+//     if (video.currentTime >= tiempoFin || video.currentTime < (tiempoInicio - 0.1))
+//         video.currentTime = tiempoInicio;
+
+/** Rearma el bucle: borra el seek pendiente y el enfriamiento anti-bucle. */
+function rearmarBucle() {
+  seekPendiente = false;
+  ultimoSaltoForzadoEn = 0;
+}
+
+/** Salto obligatorio al Inicio con marca de "seek en curso" ('seekPendiente')
+ *  y red de seguridad: si el navegador nunca emite 'seeked', el bucle se rearma
+ *  solo a los 300 ms para no quedarse muerto. */
+function forzarSaltoInicio(inicio) {
+  seekPendiente = true;
+  ultimoSaltoForzadoEn = performance.now();
+  try {
+    reproductor.currentTime = inicio;
+  } catch {
+    /* Metadata aún no lista en algún navegador: se ignora sin romper nada. */
+  }
+  setTimeout(() => {
+    seekPendiente = false;
+  }, 300); // Watchdog: sin 'seeked' el motor no puede quedarse bloqueado.
+}
+
+/** TRUCO DE INYECCIÓN DE FOTOGRAMA (seeking fix): fija el tiempo exacto y, si
+ *  el video está pausado, obliga al motor del navegador a repintar el cuadro
+ *  con una micro-reproducción play() → pause() inmediato. La bandera
+ *  'inyeccionActiva' evita que esos play/pause muevan la interfaz ni el bucle. */
+function inyectarFotograma(segundos) {
+  const duracion = duracionTotal();
+  if (duracion <= 0) return;
+  const destino = Math.min(Math.max(parseFloat(segundos) || 0, 0), duracion);
+  rearmarBucle();
+  try {
+    reproductor.currentTime = destino;
+  } catch {
+    /* Metadata aún no lista en algún navegador: se ignora sin romper nada. */
+  }
+  if (!reproductor.paused) return; // Si reproduce, el propio motor ya pinta.
+
+  inyeccionActiva = true;
+  const intento = reproductor.play();
+  if (intento && typeof intento.catch === "function") {
+    intento.catch(() => { /* Abortado por el pause() inmediato: es el diseño. */ });
+  }
+  reproductor.pause();
+  // Red por si el navegador no emite 'pause': a los 50 ms se libera la bandera.
+  setTimeout(() => {
+    if (inyeccionActiva) {
+      inyeccionActiva = false;
+      actualizarBotonPlay();
+    }
+  }, 50);
+}
+
+/** Núcleo del bucle estricto de 16 ms. Comparaciones SIEMPRE con parseFloat
+ *  estricto y doble tolerancia (inferior 0.1 s por rejilla de FPS + enfriamiento
+ *  de 0.05 s entre saltos) para que el navegador jamás quede atrapado en un
+ *  bucle infinito de seeks sobre el mismo instante temporal. */
+function aplicarBucleEstricto() {
+  if (reproductor.paused || reproductor.ended) return; // Solo manda al REPRODUCIR.
+  if (inyeccionActiva || seekPendiente || reproductor.seeking) return;
+  const inicio = parseFloat(tiempoInicio);
+  const fin = parseFloat(tiempoFin);
+  if (!Number.isFinite(inicio) || !Number.isFinite(fin) || !(fin > inicio)) return;
+  const ahora = parseFloat(reproductor.currentTime);
   if (!Number.isFinite(ahora)) return;
-  if (ahora >= fin - TOLERANCIA_BUCLE || ahora < inicio - TOLERANCIA_BUCLE) {
-    saltarA(inicio); // Reinicia igualando la posición al Tiempo Inicio.
+
+  if (ahora >= fin || ahora < inicio - TOLERANCIA_INFERIOR) {
+    if (performance.now() - ultimoSaltoForzadoEn < TOLERANCIA_SEEK * 1000) return;
+    forzarSaltoInicio(inicio);
   }
+}
+
+/** Un tic del motor: aguja al día + control estricto del rango (60 FPS). */
+function tickMotor() {
+  actualizarAguja();
+  aplicarBucleEstricto();
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +570,7 @@ function cargarArchivo(archivo) {
   datoNombre.title = archivo.name;
   datoPeso.textContent = formatearPeso(archivo.size);
   previsualizacion.hidden = false;
-  reiniciarTrimmer(); // Las barras se calibran al cargar el metadata del nuevo clip
+  reiniciarTimeline(); // La regla se calibra al cargar el metadata del nuevo clip
 
   mostrarAviso("Clip listo ✅ Pulsa ANALIZAR INCIDENTE para iniciar el estudio.", "ok");
   btnAnalizar.disabled = false;
@@ -328,7 +588,7 @@ function limpiarArchivo() {
   reproductor.load();
   previsualizacion.hidden = true;
   btnAnalizar.disabled = true;
-  reiniciarTrimmer();
+  reiniciarTimeline();
 }
 
 // Clic en la zona -> abre el selector nativo (el <label> ya lo gestiona solo)
@@ -347,12 +607,57 @@ inputArchivo.addEventListener("change", () => {
   inputArchivo.value = ""; // permite volver a elegir el mismo archivo
 });
 
-// --- Trimmer: metadata del video + barras de rango + bucle acotado -------
-reproductor.addEventListener("loadedmetadata", prepararTrimmer);
-reproductor.addEventListener("timeupdate", alActualizarTiempo);
-rangoInicio.addEventListener("input", alMoverRango);
-rangoFin.addEventListener("input", alMoverRango);
-reiniciarTrimmer(); // Estado inicial neutro
+// --- Timeline: motor unificado (16 ms + rAF), inyección de fotograma y Play -
+reproductor.addEventListener("loadedmetadata", prepararTimeline);
+reproductor.addEventListener("play", () => {
+  if (inyeccionActiva) return; // play() de la inyección: no tocar la interfaz
+  actualizarBotonPlay();
+});
+reproductor.addEventListener("pause", () => {
+  if (inyeccionActiva) inyeccionActiva = false; // Fin de la inyección forzada
+  actualizarBotonPlay();
+});
+// Escucha 'seeking'/'seeked': garantiza que el buffer se pinte en pantalla y
+// que el bucle estricto se rearma al terminar cada salto forzado.
+reproductor.addEventListener("seeking", actualizarAguja);
+reproductor.addEventListener("seeked", () => {
+  seekPendiente = false;
+  actualizarAguja();
+});
+reproductor.addEventListener("ended", alTerminarBucle);
+reproductor.addEventListener("click", alternarPlayTimeline); // Sin controles nativos
+if (timelinePlay) timelinePlay.addEventListener("click", alternarPlayTimeline);
+if (timelineRuler) timelineRuler.addEventListener("click", alClicRegla);
+if (selectionOverlay) {
+  selectionOverlay.addEventListener("pointerdown", alIniciarArrastre);
+  selectionOverlay.addEventListener("pointermove", alArrastrarSeleccion);
+  selectionOverlay.addEventListener("pointerup", alSoltarSeleccion);
+  selectionOverlay.addEventListener("pointercancel", alSoltarSeleccion);
+}
+
+// Panel de capa: ojo (atenuar la pista) y candado (bloquear el recorte).
+if (btnVer && timelineTrack) {
+  btnVer.addEventListener("click", () => {
+    const oculta = timelineTrack.classList.toggle("timeline-track--oculta");
+    btnVer.classList.toggle("timeline-layer-btn--activo", !oculta);
+    btnVer.setAttribute("aria-pressed", String(!oculta));
+  });
+}
+if (btnBloquear && timelineTrack) {
+  btnBloquear.addEventListener("click", () => {
+    pistaBloqueada = !pistaBloqueada;
+    timelineTrack.classList.toggle("timeline-track--bloqueada", pistaBloqueada);
+    btnBloquear.classList.toggle("timeline-layer-btn--activo", pistaBloqueada);
+    btnBloquear.setAttribute("aria-pressed", String(pistaBloqueada));
+  });
+}
+
+reiniciarTimeline(); // Estado inicial neutro
+// Arranque del motor unificado: control estricto cada 16 ms (operativo incluso
+// con la pestaña en segundo plano, donde rAF se suspende) + aguja roja fluida
+// a la frecuencia de refresco de la pantalla.
+setInterval(tickMotor, INTERVALO_BUCLE_MS);
+requestAnimationFrame(bucleAguja);
 
 // Eventos de arrastrar y soltar sobre la zona de carga
 ["dragenter", "dragover"].forEach((nombre) =>
@@ -443,10 +748,11 @@ async function analizarIncidente() {
   // Motor elegido en la interfaz -> parámetro `motor` (Form): "local" | "nube"
   formulario.append("motor", motorActual());
 
-  // Recorte elegido en el Trimmer -> 'tiempo_inicio' / 'tiempo_fin' en segundos.
-  // Si el usuario no tocó las barras (fin = 0), el backend usa el clip completo.
-  formulario.append("tiempo_inicio", Number(rangoInicio.value || 0).toFixed(1));
-  formulario.append("tiempo_fin", Number(rangoFin.value || 0).toFixed(1));
+  // Recorte elegido en la Timeline -> 'tiempo_inicio' / 'tiempo_fin' en
+  // segundos con precisión de milisegundos (toFixed(3)). Sin clip cargado
+  // llegan 0.000 y el backend analiza el archivo completo.
+  formulario.append("tiempo_inicio", (parseFloat(tiempoInicio) || 0).toFixed(3));
+  formulario.append("tiempo_fin", (parseFloat(tiempoFin) || 0).toFixed(3));
 
   try {
     const respuesta = await fetch("/analizar", {
@@ -479,6 +785,70 @@ function renderizarInforme(informe) {
   panelResultados.hidden = false;
   panelResultados.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+// ---------------------------------------------------------------------------
+// Pantalla Completa del video (Full Screen API nativa con variantes)
+// ---------------------------------------------------------------------------
+
+/** Elemento actualmente a pantalla completa (estándar + prefijos) o null. */
+function elementoEnPantallaCompleta() {
+  return (
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement ||
+    null
+  );
+}
+
+/**
+ * Alterna la Pantalla Completa sobre el <video> (pantalla limpia, sin la
+ * interfaz encima). El motor del bucle estricto NO se detiene en fullscreen:
+ * el `setInterval(tickMotor, INTERVALO_BUCLE_MS)` sigue latiendo en segundo
+ * plano (el intervalo del motor jamás se limpia) y fuerza el regreso a
+ * 'tiempoInicio' en cuanto el video supera 'tiempoFin'; rAF solo mueve la
+ * aguja roja, por lo que la suspensión de rAF jamás afecta al bucle.
+ */
+function alternarPantallaCompleta() {
+  try {
+    if (elementoEnPantallaCompleta()) {
+      const salida =
+        document.exitFullscreen ||
+        document.webkitExitFullscreen ||
+        document.mozCancelFullScreen ||
+        document.msExitFullscreen;
+      if (salida) salida.call(document);
+      return;
+    }
+
+    const solicitud =
+      reproductor.requestFullscreen ||
+      reproductor.webkitRequestFullscreen ||
+      reproductor.webkitEnterFullscreen || // iOS Safari (solo sobre el vídeo)
+      reproductor.mozRequestFullScreen ||
+      reproductor.msRequestFullscreen;
+
+    if (!solicitud) {
+      mostrarAviso("Tu navegador no admite Pantalla Completa.", "error");
+      return;
+    }
+
+    const promesa = solicitud.call(reproductor);
+    if (promesa && typeof promesa.catch === "function") {
+      promesa.catch(() =>
+        mostrarAviso("El navegador denegó la Pantalla Completa.", "error")
+      );
+    }
+  } catch (_error) {
+    mostrarAviso("No se pudo activar la Pantalla Completa.", "error");
+  }
+}
+
+btnFullscreen.addEventListener("click", alternarPantallaCompleta);
+// Refuerzo del control estricto al entrar/salir de pantalla completa: tico
+// inmediato del motor (el setInterval de 16 ms sigue activo igualmente).
+document.addEventListener("fullscreenchange", () => tickMotor());
+document.addEventListener("webkitfullscreenchange", () => tickMotor());
 
 // ---------------------------------------------------------------------------
 // Listeners de acción

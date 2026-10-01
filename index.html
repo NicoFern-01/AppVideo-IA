@@ -68,46 +68,81 @@
 
         <!-- Reproductor nativo HTML5: oculto hasta que haya un archivo -->
         <div class="previsualizacion" id="previsualizacion" hidden>
-          <video id="reproductor" controls playsinline preload="metadata"></video>
+          <video id="reproductor" playsinline preload="metadata"
+                 title="Clic para reproducir o pausar"></video>
 
-          <!-- ====== Trimmer: delimita el segundo exacto de la maniobra ====== -->
-          <div class="trimmer" id="trimmer">
-            <div class="trimmer-cabecera">
-              <span class="trimmer-titulo">✂️ RECORTE DE LA MANIOBRA</span>
+          <!-- ====== Timeline window: línea de tiempo profesional (estilo NLE) ====== -->
+          <section class="timeline-window" id="timeline-window"
+                   aria-label="Línea de tiempo: regla, pista de video y rango de recorte">
+            <!-- Barra de herramientas: Play/Pausa + lectura exacta + Quitar clip -->
+            <div class="timeline-toolbar">
+              <button type="button" class="timeline-play" id="timeline-play"
+                      aria-label="Reproducir el tramo seleccionado">▶</button>
+              <div class="timeline-readout">
+                <span class="timeline-readout-par"><b>INICIO</b><i id="tl-inicio">00.000 s</i></span>
+                <span class="timeline-readout-par"><b>FIN</b><i id="tl-fin">00.000 s</i></span>
+                <span class="timeline-readout-par timeline-readout-par--fragmento"><b>FRAGMENTO</b><i id="tl-fragmento">00.000 s</i></span>
+                <span class="timeline-readout-par timeline-readout-par--pos"><b>POS</b><i id="tl-posicion">00.000 s</i></span>
+              </div>
+              <button type="button" class="timeline-fullscreen" id="btn-fullscreen"
+                      title="Ver el video a pantalla completa (el bucle estricto sigue activo)">🔳 Pantalla Completa</button>
+              <button type="button" class="btn-tenue timeline-quitar" id="btn-quitar">✕ Quitar clip</button>
             </div>
-            <!-- Línea de tiempo premium: tiempos gigantes + duración del fragmento -->
-            <p class="trimmer-display" id="trimmer-display" aria-live="polite">
-              <span class="trimmer-display-inicio" id="trimmer-display-inicio">Inicio: 00.000 seg</span>
-              <span class="trimmer-display-sep" aria-hidden="true">|</span>
-              <span class="trimmer-display-fin" id="trimmer-display-fin">Fin: 00.000 seg</span>
-              <span class="trimmer-display-duracion" id="trimmer-display-duracion">· Fragmento: 00.000 seg</span>
+
+            <!-- Cuerpo: capa lateral (controles) + carriles (regla, pistas y aguja) -->
+            <div class="timeline-body">
+              <aside class="timeline-sidebar" aria-label="Capas de la línea de tiempo">
+                <div class="timeline-sidebar-cabecera">TRACKS</div>
+                <div class="timeline-layer-head">
+                  <span class="timeline-layer-nombre">Video Track 1</span>
+                  <span class="timeline-layer-botones">
+                    <button type="button" class="timeline-layer-btn timeline-layer-btn--activo"
+                            id="timeline-ver" aria-pressed="true"
+                            title="Atenuar o mostrar la pista de video">👁</button>
+                    <button type="button" class="timeline-layer-btn"
+                            id="timeline-bloquear" aria-pressed="false"
+                            title="Bloquear o desbloquear el rango de recorte">🔒</button>
+                  </span>
+                </div>
+              </aside>
+
+              <div class="timeline-lanes" id="timeline-lanes">
+                <!-- Regla superior: marcas milimétricas del video original -->
+                <div class="timeline-ruler" id="timeline-ruler"
+                     title="Clic en la regla para saltar a ese tiempo del video"></div>
+                <!-- Pista de video principal con el bloque de recorte encima -->
+                <div class="timeline-tracks">
+                  <div class="timeline-track" id="timeline-track">
+                    <div class="timeline-track-clip" aria-hidden="true">
+                      <span class="timeline-track-etiqueta">🎞️ VIDEO CLIP</span>
+                    </div>
+                    <div class="selection-overlay" id="selection-overlay"
+                         role="group"
+                         aria-label="Rango de recorte: arrastra para mover; usa los bordes para ajustar Inicio y Fin">
+                      <span class="selection-etiqueta selection-etiqueta--inicio" id="sel-etiqueta-inicio">00.000</span>
+                      <span class="selection-etiqueta selection-etiqueta--fin" id="sel-etiqueta-fin">00.000</span>
+                      <span class="selection-handle selection-handle--inicio" data-modo="inicio" title="Ajustar Inicio"></span>
+                      <span class="selection-handle selection-handle--fin" data-modo="fin" title="Ajustar Fin"></span>
+                    </div>
+                  </div>
+                </div>
+                <!-- Aguja roja: cruza regla y pistas con la posición de reproducción -->
+                <div class="playhead-line" id="playhead-line" hidden aria-hidden="true">
+                  <span class="playhead-cabeza"></span>
+                </div>
+              </div>
+            </div>
+
+            <p class="timeline-ayuda">
+              Arrastra el bloque verde para encuadrar la maniobra: el video salta al
+              fotograma exacto y reproduce solo dentro del rango. Clic en la regla
+              para mover la aguja roja. Si no tocas nada, se analiza el clip completo.
             </p>
-            <!-- Etiqueta compacta (la consume app.js; oculta visualmente) -->
-            <span class="trimmer-tiempos trimmer-tiempos--oculto" id="trimmer-tiempos">Inicio: 00.000s | Fin: 00.000s</span>
-            <!-- Botonera: Play/Pausa dedicado del tramo (arranca en Inicio) -->
-            <div class="trimmer-botonera">
-              <button type="button" class="trimmer-play" id="trimmer-play" aria-label="Reproducir el tramo recortado">▶️</button>
-              <span class="trimmer-play-ayuda">Reproduce el tramo en bucle</span>
-            </div>
-            <!-- Rango dual: dos perillas sobre la misma pista horizontal -->
-            <div class="dual-range" id="dual-range">
-              <div class="dual-range-pista" aria-hidden="true"></div>
-              <div class="dual-range-seleccion" id="dual-seleccion" aria-hidden="true"></div>
-              <input type="range" class="dual-range-input" id="rango-inicio"
-                     min="0" max="100" step="0.001" value="0" aria-label="Tiempo de inicio del recorte">
-              <input type="range" class="dual-range-input" id="rango-fin"
-                     min="0" max="100" step="0.001" value="0" aria-label="Tiempo de fin del recorte">
-            </div>
-            <p class="trimmer-ayuda">
-              Arrastra las perillas para encuadrar el toque: el reproductor salta al
-              fotograma exacto. Si no tocas nada, se analiza el clip completo.
-            </p>
-          </div>
+          </section>
           <div class="previsualizacion-datos">
             <span class="dato" id="dato-nombre" title=""></span>
             <span class="dato dato-peso" id="dato-peso"></span>
           </div>
-          <button type="button" class="btn-tenue" id="btn-quitar">✕ Quitar clip</button>
         </div>
 
         <!-- ====== Contexto opcional de la maniobra (se inyecta en el prompt) ====== -->

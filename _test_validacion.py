@@ -63,6 +63,20 @@ comprobar("Frame 1: prueba" in mensaje, "La telemetría viaja dentro")
 mensaje_nube = main._construir_mensaje_usuario("ctx", reglamento, "tel", total_fotogramas=20)
 comprobar("(20 fotogramas" in mensaje_nube, "El mensaje anuncia la densidad del motor (20 fotogramas en nube)")
 
+# Recorte estricto: el prompt declara EXACTAMENTE el fragmento analizado.
+mensaje_ventana = main._construir_mensaje_usuario("ctx", reglamento, "tel", ventana=(3.0, 7.5))
+comprobar(
+    "única y exclusivamente" in mensaje_ventana
+    and "segundo 3.000" in mensaje_ventana
+    and "segundo 7.500" in mensaje_ventana,
+    "El mensaje declara el fragmento estricto (segundo 3.000 al 7.500)",
+)
+mensaje_sin_ventana = main._construir_mensaje_usuario("ctx", reglamento, "tel")
+comprobar(
+    "única y exclusivamente" not in mensaje_sin_ventana,
+    "Sin ventana NO se inyecta la línea de fragmento",
+)
+
 # -------------------------------------- 3) TELEMETRÍA UNITARIA (DETECCIÓN FALSA)
 print("\n=== 3) Lectura de movimiento unitaria (detección simulada) ===")
 original_detectar = main._detectar_vehiculos
@@ -370,6 +384,31 @@ else:
         len(frames_completos) == 5,
         f"Ventana inválida -> clip completo (obtenidos: {len(frames_completos)})",
     )
+
+    # (e) Recorte estricto del FIN: el último fotograma extraído debe ser el
+    # de frame_end = int(3.0 * fps) — jamás uno posterior al fin del rango.
+    img_fin = _cv2.imdecode(
+        _np.frombuffer(_b64.b64decode(frames_ventana[-1]), _np.uint8), _cv2.IMREAD_COLOR
+    )
+    cap = _cv2.VideoCapture(str(ruta_test))
+    fps_test = cap.get(_cv2.CAP_PROP_FPS) or 25.0
+    frame_end_esperado = int(3.0 * fps_test)
+    cap.set(_cv2.CAP_PROP_POS_FRAMES, frame_end_esperado)
+    leido_fin, ref_fin = cap.read()
+    cap.release()
+    if leido_fin and ref_fin is not None:
+        ref_fin = _cv2.resize(
+            ref_fin,
+            (main.ANCHO_FOTOGRAMA, main.ALTO_FOTOGRAMA),
+            interpolation=_cv2.INTER_AREA,
+        )
+        diff_fin = float(_np.mean(_np.abs(img_fin.astype("int16") - ref_fin.astype("int16"))))
+        comprobar(
+            diff_fin < 6.0,
+            f"Recorte estricto: el último frame es frame_end={frame_end_esperado} (diff={diff_fin:.2f})",
+        )
+    else:
+        comprobar(False, "No se pudo leer el frame de referencia del fin del rango")
 
 # --- Fallback seguro: la IA nunca rompe la interfaz --------------------------
 # La contingencia es por motor: 'nube' usa el mensaje que pide acortar el

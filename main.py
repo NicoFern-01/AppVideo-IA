@@ -138,15 +138,21 @@ MAX_CONTEXTO_CHARS = 500           # Tope del texto de contexto: protege num_ctx
 # (MAYOR cambia de arquitectura · MENOR nueva capacidad · PARCHE correcciones)
 # y actualiza FECHA_ACTUALIZACION. El pie de la web lo muestra al instante
 # (GET /version + app.js), así sabrás siempre qué build está corriendo.
-VERSION_APP = "2.4.0"               # 2.4.0 = Gemini JSON STRICT + bucle acotado +
-                                    #         línea de tiempo premium (fibra de carbono)
+VERSION_APP = "2.6.0"               # 2.6.0 = Pantalla Completa en la timeline + recorte
+                                    #         estricto matemático de fotogramas (int(fps*t))
+                                    # 2.5.1 = Motor de reproducción unificado: bucle estricto
+                                    #         a 16 ms (sin timeupdate) + inyección de fotograma
+                                    # 2.5.0 = Timeline window estilo NLE (regla milimétrica,
+                                    #         bloque verde al ms, aguja roja, bucle estricto)
+                                    # 2.4.0 = Gemini JSON STRICT + bucle acotado +
+                                    #         rango dual premium (aguamarina + ms + Play/Pausa)
                                     # 2.3.0 = Trimmer (recorte por tiempo) + Gemini con
                                     #         responseSchema nativo + informe seguro por defecto
                                     # 2.2.0 = doble motor Local/Nube (Gemini) + densidad
                                     #         dinámica de fotogramas (5 local / 20 nube)
                                     # 2.1.0 = informe deportivo limpio (sin jerga técnica)
                                     # 2.0.0 = arquitectura híbrida VLM + YOLOv11 + RAG
-FECHA_ACTUALIZACION = "2026-09-30"
+FECHA_ACTUALIZACION = "2026-10-01"
 
 # --- Modelo de visión local ---------------------------------------------------
 MODELO_VLM = "qwen2.5vl:7b"
@@ -391,8 +397,9 @@ def extraer_fotogramas_base64(
     ----------
     ventana : tuple[float, float] | None
         (inicio_s, fin_s) con el segundo inicial y final de la maniobra. OpenCV
-        salta directamente a ese rango y solo procesa esos fotogramas, de modo
-        que la densidad de muestreo se concentra donde está el toque.
+        salta directamente a frame_start = int(inicio_s * fps) y solo procesa
+        fotogramas hasta frame_end = int(fin_s * fps): la IA recibe ÚNICAMENTE
+        el recorte elegido, con la densidad concentrada donde está el toque.
 
     Optimización para GPU de 6 GB de VRAM:
       * cv2.resize OBLIGATORIO a 640x480 px por fotograma.
@@ -418,61 +425,94 @@ def extraer_fotogramas_base64(
         if total_frames <= 0:
             raise ValueError("El video no contiene fotogramas legibles.")
 
-        # --- 2) Ventana del Trimmer -> índices equidistantes dentro del rango --
-        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-        indice_ini, indice_fin, hay_ventana = 0, total_frames - 1, False
-        if ventana and fps > 0:
+        # --- 2) Ventana del Trimmer -> límites de fotograma MATEMÁTICOS --------
+        # `frame_start` y `frame_end` se calculan con TRUNCADO (int), tal como
+        # exige el recorte estricto, y TODO el muestreo posterior vive SOLO
+        # entre ambos índices: jamás se lee ni se envía a la IA un fotograma
+        # fuera del rango elegido por el usuario.
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        frame_start, frame_end = 0, total_frames - 1
+        if ventana is not None:
             inicio_s, fin_s = ventana
-            indice_ini = max(0, min(int(round(inicio_s * fps)), total_frames - 1))
-            indice_fin = max(0, min(int(round(fin_s * fps)), total_frames - 1))
-            hay_ventana = indice_fin > indice_ini
+            if fin_s > inicio_s:
+                # Recorte ESTRICTO: sin fallback al clip completo aunque el
+                # rango colisione con los bordes del archivo (se recorta a los
+                # bordes). Sin FPS no hay matemática posible -> error claro.
+                if fps <= 0:
+                    raise ValueError(
+                        "OpenCV no pudo determinar los FPS del video: "
+                        "no es posible aplicar el recorte con precisión."
+                    )
+                frame_start = max(0, min(int(inicio_s * fps), total_frames - 1))
+                frame_end = max(frame_start, min(int(fin_s * fps), total_frames - 1))
+            # (fin <= inicio -> "sin recorte": clip completo; es además el
+            # contrato legacy de /analizar con 0.0 / 0.0.)
 
-        if hay_ventana:
-            # Solo los fotogramas del rango elegido: la densidad se concentra en
-            # la maniobra (5 para Ollama / hasta 20 para Gemini).
-            cantidad = min(max_frames, indice_fin - indice_ini + 1)
-            indices = np.unique(
-                np.linspace(indice_ini, indice_fin, cantidad).round().astype(int)
-            )
-        else:
-            cantidad = min(max_frames, total_frames)
-            indices = np.unique(
-                np.linspace(0, total_frames - 1, cantidad).round().astype(int)
-            )
+        # Muestreo equidistante EXCLUSIVAMENTE dentro de [frame_start, frame_end]
+        # (5 fotogramas para Ollama; 15-20 para Gemini, según `max_frames`).
+        cantidad = min(max_frames, frame_end - frame_start + 1)
+        indices = np.unique(
+            np.linspace(frame_start, frame_end, cantidad).round().astype(int)
+        )
 
         # --- 3) Extracción -> resize 640x480 -> YOLO -> JPEG 85 -> Base64 ------
         fotogramas: List[str] = []
         lineas_telemetria: List[str] = []
         distancia_previa: float | None = None
 
-        for indice in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(indice))
+        # Salto directo al inicio del recorte: OpenCV posiciona el decoder en
+        # `frame_start` (sin decodificar el tramo anterior) y desde AHÍ solo se
+        # avanza secuencialmente hacia delante.
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_start))
+        objetivos = {int(indice) for indice in indices}
+        contador = int(frame_start)
+
+        while contador <= frame_end:
+            # CORTE DURO: si el contador de frames del archivo supera
+            # `frame_end`, la lectura se detiene por completo.
+            if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) > frame_end:
+                break
+
             leido, imagen = cap.read()
             if not leido or imagen is None:
-                continue
+                break
 
-            imagen = cv2.resize(
-                imagen,
-                (ANCHO_FOTOGRAMA, ALTO_FOTOGRAMA),
-                interpolation=cv2.INTER_AREA,
-            )
+            if contador in objetivos:
+                # Solo el fotograma objetivo entra en la cadena: si el decoder
+                # reporta una posición desviada, se re-sincroniza al índice exacto.
+                if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) != contador + 1:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, contador)
+                    leido, imagen = cap.read()
+                    if not leido or imagen is None:
+                        break
 
-            codificado, buffer = cv2.imencode(
-                ".jpg",
-                imagen,
-                [int(cv2.IMWRITE_JPEG_QUALITY), CALIDAD_JPEG],
-            )
-            if not codificado:
-                continue
+                imagen = cv2.resize(
+                    imagen,
+                    (ANCHO_FOTOGRAMA, ALTO_FOTOGRAMA),
+                    interpolation=cv2.INTER_AREA,
+                )
 
-            # --- Telemetría YOLO del fotograma (misma numeración que el VLM) ---
-            numero_fotograma = len(fotogramas) + 1
-            linea, distancia_previa = _telemetria_de_fotograma(
-                numero_fotograma, imagen, distancia_previa
-            )
-            lineas_telemetria.append(linea)
+                codificado, buffer = cv2.imencode(
+                    ".jpg",
+                    imagen,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), CALIDAD_JPEG],
+                )
+                if not codificado:
+                    contador += 1  # avanza SIEMPRE: en un while, un `continue`
+                    continue        # sin incremento dejaría el motor colgado
 
-            fotogramas.append(base64.b64encode(buffer.tobytes()).decode("utf-8"))
+                # --- Telemetría YOLO del fotograma (misma numeración que el VLM) ---
+                numero_fotograma = len(fotogramas) + 1
+                linea, distancia_previa = _telemetria_de_fotograma(
+                    numero_fotograma, imagen, distancia_previa
+                )
+                lineas_telemetria.append(linea)
+
+                fotogramas.append(base64.b64encode(buffer.tobytes()).decode("utf-8"))
+                if len(fotogramas) >= len(objetivos):
+                    break  # rango ya cubierto: ahorra decodificar de más
+
+            contador += 1
 
         if not fotogramas:
             raise ValueError("No se pudo extraer ningún fotograma del video.")
@@ -537,6 +577,7 @@ def _construir_mensaje_usuario(
     reglamento: str,
     telemetria: str,
     total_fotogramas: int = MAX_FOTOGRAMAS_LOCAL,
+    ventana: tuple[float, float] | None = None,
 ) -> str:
     """
     Construye el User Message para el motor de análisis inyectando las TRES
@@ -550,11 +591,26 @@ def _construir_mensaje_usuario(
 
     `total_fotogramas` indica cuántos fotogramas viajan adjuntos (5 en local,
     hasta 20 en nube) y se anuncian en orden cronológico dentro del mensaje.
+    `ventana` (inicio_s, fin_s) declara el recorte estricto del Trimmer: si
+    existe, el mensaje advierte a la IA de que SOLO existe información de
+    ese fragmento y nada del resto del video.
     """
     texto = (contexto or "").strip()
     if len(texto) > MAX_CONTEXTO_CHARS:
         texto = texto[:MAX_CONTEXTO_CHARS]
     texto = texto.rstrip(" .") or "Ninguno aportado"
+
+    # Aviso de recorte estricto (solo con ventana real): la IA debe saber que
+    # las imágenes pertenecen ÚNICAMENTE a ese fragmento y a nada más.
+    fragmento = ""
+    if ventana is not None and ventana[1] > ventana[0]:
+        inicio_s, fin_s = ventana
+        fragmento = (
+            "=== FRAGMENTO ANALIZADO (RECORTE ESTRICTO) ===\n"
+            "Las imágenes adjuntas corresponden única y exclusivamente al fragmento de "
+            f"tiempo delimitado entre el segundo {inicio_s:.3f} y el segundo {fin_s:.3f} "
+            "del video original. No hay información del resto del video.\n\n"
+        )
 
     return (
         f"Analiza el incidente mostrado en la secuencia adjunta ({total_fotogramas} "
@@ -566,6 +622,7 @@ def _construir_mensaje_usuario(
         f"{telemetria}\n\n"
         "=== FUENTE 3 · CONTEXTO APORTADO POR EL USUARIO ===\n"
         f"{texto}\n\n"
+        f"{fragmento}"
         "INSTRUCCIONES FINALES: contrasta lo que VES en las imágenes con la FUENTE 2 "
         "(quién se acercaba a quién y en qué momento hubo solapamiento o contacto) "
         "y aplica el ARTÍCULO exacto de la FUENTE 1 que corresponda, citándolo en "
@@ -850,6 +907,7 @@ def generar_informe_json(
     contexto: str | None = None,
     informe_telemetria_yolo: str = "",
     motor: str = MOTOR_LOCAL,
+    ventana: tuple[float, float] | None = None,
 ) -> Dict[str, str]:
     """
     Envía la secuencia de fotogramas Base64 al motor elegido (Ollama local o
@@ -888,7 +946,11 @@ def generar_informe_json(
     # --- User Message: reglamento (RAG) + lectura de movimiento + contexto ----
     reglamento = _leer_reglamento()  # RAG local: se relee en cada petición
     mensaje_usuario = _construir_mensaje_usuario(
-        contexto, reglamento, informe_telemetria_yolo, len(fotogramas_base64)
+        contexto,
+        reglamento,
+        informe_telemetria_yolo,
+        len(fotogramas_base64),
+        ventana=ventana,
     )
 
     # --- Consulta PROTEGIDA al motor (Ollama local o Gemini en la nube) -------
@@ -1088,6 +1150,20 @@ async def analizar_incidente(
         raise HTTPException(status_code=413, detail=detalle)
 
     # (3) Extracción de fotogramas optimizados (densidad según motor) + YOLO
+    # Sanidad del rango del Trimmer: sin tiempos negativos ni invertidos. El
+    # recorte estricto exige inicio <= fin; 0.0 / 0.0 sigue significando
+    # "clip completo" (contrato legacy documentado en los Form del endpoint).
+    if tiempo_inicio < 0.0 or tiempo_fin < 0.0:
+        raise HTTPException(
+            status_code=400,
+            detail="El rango del Trimmer no puede contener tiempos negativos.",
+        )
+    if tiempo_fin < tiempo_inicio:
+        raise HTTPException(
+            status_code=400,
+            detail="El segundo final del recorte no puede ser anterior al inicial.",
+        )
+
     ruta_temporal = guardar_clip_temporal(datos, extension)
     try:
         # Ventana del Trimmer: si el usuario no recortó, None = clip completo.
@@ -1102,9 +1178,15 @@ async def analizar_incidente(
             os.unlink(ruta_temporal)
 
     # (4) Análisis con el motor elegido y (5) respuesta JSON directa al frontend
+    # `ventana` viaja también al prompt: la IA es advertida de que SOLO existe
+    # información del fragmento recortado (nada del resto del video).
     return JSONResponse(
         content=generar_informe_json(
-            fotogramas, contexto, informe_telemetria_yolo, motor_normalizado
+            fotogramas,
+            contexto,
+            informe_telemetria_yolo,
+            motor_normalizado,
+            ventana=ventana,
         )
     )
 
